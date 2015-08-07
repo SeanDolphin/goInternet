@@ -81,7 +81,7 @@ func defaultHandler(w http.ResponseWriter, r *http.Request) {
 
 
 func main() {
-	con, err = sql.Open("mysql", "root:veggies@/golang")
+	con, err = sql.Open("mysql", "root:fruits@/golang")
 	checkErr(err)
 	http.HandleFunc("/user/", userHandler)
 	http.HandleFunc("/", defaultHandler)
