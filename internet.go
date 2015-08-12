@@ -2,16 +2,22 @@ package main
 
 import (
 	"database/sql"
-	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
 
+	"github.com/codegangsta/negroni"
 	_ "github.com/go-sql-driver/mysql"
+	"github.com/gorilla/mux"
+	"github.com/unrolled/render"
 )
 
 var con *sql.DB
+var r *render.Render
+
+var ErrNoPeople = errors.New("")
 
 type person struct {
 	//person is a person with a name, and an age
@@ -26,7 +32,7 @@ type jsonResponse struct {
 	Data  []person `json:"data"`
 }
 
-func getPeople(name string) []person {
+func getPeople(name string) ([]person, error) {
 
 	//an array to hold the results we get from our query
 	var people []person
@@ -40,18 +46,22 @@ func getPeople(name string) []person {
 		//and empty person to hold the data from this row
 		me := person{}
 		if err := row.Scan(&me.Name, &me.Age); err != nil {
-			panic(err)
+			return people, err
 		}
 
 		//append this person to the people array
 		people = append(people, me)
 	}
 
+	if len(people) == 0 {
+		return people, ErrNoPeople
+	}
+
 	//return all fo the results [which may be empty]
-	return people
+	return people, nil
 }
 
-func userHandler(w http.ResponseWriter, r *http.Request) {
+func userHandler(writer http.ResponseWriter, req *http.Request) {
 
 	//crafting the default response.  Create an empty person struct
 	//then add it to an array, and set the response struct's data
@@ -61,9 +71,9 @@ func userHandler(w http.ResponseWriter, r *http.Request) {
 	response := jsonResponse{Valid: false, Data: []person{}}
 
 	//if we got a user in the uesr field, query the database
-	if r.FormValue("user") != "" {
-		people := getPeople(r.FormValue("user"))
-		if len(people) > 0 {
+	if userName := req.FormValue("user"); userName != "" {
+
+		if people, err := getPeople(userName); err == nil {
 			//if we got soem results, put them in the response
 			response.Data = people
 			response.Valid = true
@@ -71,11 +81,11 @@ func userHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	//turn our response struct into a json
-	json.NewEncoder(w).Encode(response)
+	r.JSON(writer, http.StatusOK, response)
 }
 
-func defaultHandler(w http.ResponseWriter, r *http.Request) {
-	fmt.Fprintf(w, "This is the default response")
+func defaultHandler(writer http.ResponseWriter, req *http.Request) {
+	fmt.Fprintf(writer, "This is the default response")
 }
 
 func main() {
@@ -85,15 +95,18 @@ func main() {
 		log.Fatal(err)
 	}
 
-	http.HandleFunc("/user/", userHandler)
-	http.HandleFunc("/", defaultHandler)
+	r = render.New(render.Options{})
+
+	mux := mux.NewRouter()
+	mux.HandleFunc("/user", userHandler).Methods("POST")
+	mux.HandleFunc("/", defaultHandler).Methods("POST")
 
 	PORT := ":" + os.Getenv("PORT")
 	if PORT == ":" {
 		PORT = ":8080"
 	}
 
-	if err := http.ListenAndServe(PORT, nil); err != nil {
-		log.Fatal(err)
-	}
+	n := negroni.Classic()
+	n.UseHandler(mux)
+	n.Run(PORT)
 }
